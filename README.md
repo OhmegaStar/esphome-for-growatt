@@ -6,6 +6,10 @@ forked from https://github.com/klatremis/esphome-for-growatt
 
 * For DIY generic esp32 hardware, I use ESP32-S3-WROOM N16R8 Board with a TTL to RS485 Board with Auto Flow Control and the wiring below
 
+* I Use these ESPHome Modbus Controllers at the same time the inverters have their original shine wifi-x sticks installed, and it is possible to control via growatt web, growatt app, homeassistant, and this homeassistant integration that interfaces growatt server all at the same time (ah... Well probably not the same setting in all those places at the same time, but they can co-exist);
+https://github.com/OhmegaStar/ad-growatt
+
+
 ## Supported devices
 ### SPH inverters
 * SPH10000TL3-BH-UP (confirmed), use the growatt-sph-10k-tl3-bh-up.yaml
