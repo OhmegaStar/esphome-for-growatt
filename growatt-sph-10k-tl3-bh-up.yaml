@@ -1,0 +1,1329 @@
+substitutions:
+  device_name: growatt-sph-10k-tl3-bh-up
+  friendly_name: Growatt (Hybrid)
+  device_description: Growatt SPH 10k TL3 BH-UP (Hybrid)
+  modbus_controller_id: controller1
+  modbus_update_interval: 15s #normal update
+  skip_updates_1min: "4"  #how many times to skip normal update for slow updating sensors
+  skip_updates_10min: "20"  #how many times to skip normal update for slow updating sensors
+  update_fast: "15s"
+  update_normal: "60s"
+  update_slow: "300s"
+
+#########################################################################################################
+### FROM https://community.home-assistant.io/t/esphome-modbus-growatt-shinewifi-s/369171/181?page=9 ###
+### code from plawa: https://community.home-assistant.io/t/esphome-modbus-growatt-shinewifi-s/369171/135
+### https://github.com/klatremis/esphome-for-growatt ###
+#########################################################################################################
+### Made for Growatt SPH 10000TL3 BH UP
+#########################################################################################################
+globals:
+  - id: boot_complete
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+esphome:
+  name: '${device_name}'
+  friendly_name: '${friendly_name}'
+  comment: '${device_description}'
+
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(boot_complete) = true;
+          ESP_LOGI("boot", "Boot complete, actions now allowed");
+
+#Developed on a ESP32-S3-WROOM N16R8 Board with a TTL to RS485 Board with Auto Flow Control
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+psram:
+  mode: octal
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret growatt-sph-10k-tl3-bh-up_api-encryption-key
+
+ota:
+  - platform: esphome
+    password: !secret growatt-sph-10k-tl3-bh-up_ota-password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Growatt-Sph-10K-Tl3-Bh-Up"
+    password: "hZvrZ7aJMN6U"
+
+captive_portal:
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+#Board contains an adressable neopixel.
+#TODO: Enable state signalling via the pixel
+#output:
+    # Green LED
+#  - id: led_green
+#    platform: gpio
+#    pin: GPIO0
+
+    # Red LED
+#  - id: led_red
+#    platform: gpio
+#    pin: GPIO2
+
+#    # Blue LED
+#  - id: led_blue
+#    platform: gpio
+#    pin: GPIO16
+
+uart:
+  id: mod_bus
+  tx_pin: 17 ##U0TXD
+  rx_pin: 16 ##U0RXD
+  baud_rate: 9600
+  #baud_rate: 38400 #See Register 22 - cannot be changed in runtime
+  stop_bits: 1
+#  debug:
+#    direction: RX
+#    dummy_receiver: false
+#    after:
+#      delimiter: "\n"
+#    sequence:
+#      - lambda: UARTDebug::log_string(direction, bytes);
+
+modbus:
+  id: modbus1
+# flow_control_pin: 4 #for use when you use a rs485 board without auto flow control. Like the rs485 max board.
+ 
+modbus_controller:
+  - id: ${modbus_controller_id}
+    address: 0x1
+    modbus_id: modbus1
+    setup_priority: -10
+    update_interval: ${modbus_update_interval}
+    #TODO: the command_throttle setting seem to cause some "Duplicate modbus command found" messages, but it sees they cause no real issues
+    command_throttle: 1000ms # Growatt documentation recommends 1s 
+
+######################################################################################################################
+# Setup for Growatt SPH 10k-TL3 BH-UP
+######################################################################################################################
+# Storage(SPH Type)：03 register range：0~124,1000~1124；(The 03 registers are called "holding" registers. Often R/W)
+# 04 register range：0~124,1000~1124，1125~1249 (The 04 registers are called "input" registes - read only)
+# Reference doc: growatt-inverter-modbus-rtu-protocol-ii-v1-24-english-new_compress.pdf
+######################################################################################################################
+datetime:
+  #Battery First Timeslot 1 - Start
+  - platform: template
+    id: battery_first_start
+    name: "Battery First Start"
+    type: time
+    optimistic: yes
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            // Only write if raw sensor has a valid state
+            if (id(battery_first_start_raw).has_state() && id(battery_first_end_raw).has_state()) {
+              uint16_t start_combined = (x.hour << 8) | x.minute;
+              uint16_t current_raw = id(battery_first_start_raw).state;  // last raw register value
+
+              if (start_combined != current_raw) {
+                //Write Needed
+                esphome::modbus_controller::ModbusController *controller = id(controller1);
+
+                // Get current end time from template entity
+                uint16_t end_combined = (id(battery_first_end).hour << 8) | id(battery_first_end).minute;
+
+                // Read timeslot 1 enabled state flag
+                uint16_t enabled_flag =(id(battery_first_timeslot1_state).state == "Enabled") ? 1 : 0;
+
+                // Build payload: [start, end, enabled_flag]
+                std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
+
+                ESP_LOGI("modbus", "Battery First Timeslot 1 Write → Start %02d:%02d End %02d:%02d Enabled=%d",
+                        x.hour, x.minute,
+                        id(battery_first_end).hour, id(battery_first_end).minute,
+                        enabled_flag);
+
+                controller->queue_command(
+                  esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 1100, payload.size(), payload)
+                );
+
+                id(battery_first_start_raw).publish_state(start_combined);
+                ESP_LOGI("modbus", "Battery First Timeslot 1 Start Updated");
+              }
+            } else {
+              ESP_LOGI("modbus", "Skip write: raw sensors not yet initialized");
+            }
+
+  #Battery First Timeslot 1 - End
+  - platform: template
+    id: battery_first_end
+    name: "Battery First End"
+    type: time
+    optimistic: yes
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            // Only write if raw sensor has a valid state
+            if (id(battery_first_start_raw).has_state() && id(battery_first_end_raw).has_state()) {
+              uint16_t end_combined = (x.hour << 8) | x.minute;
+              uint16_t current_raw = id(battery_first_end_raw).state;  // last raw register value
+
+              if (end_combined != current_raw) {
+                //Write Needed
+                esphome::modbus_controller::ModbusController *controller = id(controller1);
+
+                // Get current start time from template entity
+                uint16_t start_combined = (id(battery_first_start).hour << 8) | id(battery_first_start).minute;
+
+                // Read timeslot 1 enabled state flag
+                uint16_t enabled_flag =(id(battery_first_timeslot1_state).state == "Enabled") ? 1 : 0;
+
+                // Build payload: [start, end, enabled_flag]
+                std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
+
+                ESP_LOGI("modbus", "Battery First Timeslot 1 Write → Start %02d:%02d End %02d:%02d Enabled=%d",
+                        id(battery_first_start).hour, id(battery_first_start).minute,
+                        x.hour, x.minute,
+                        enabled_flag);
+
+                controller->queue_command(
+                  esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 1100, payload.size(), payload)
+                );
+
+
+                id(battery_first_start_raw).publish_state(start_combined);
+                ESP_LOGI("modbus", "Battery First Timeslot 1 End Updated");
+              }
+            } else {
+              ESP_LOGI("modbus", "Skip write: raw sensors not yet initialized");
+            }
+            
+sensor:
+  #Generic Sensors (not Growatt model specific)
+  - platform: uptime
+    name: "Uptime Sensor"
+    id: uptime_sensor
+    update_interval: ${update_slow}
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: ${update_normal}
+
+
+  #Inverter State Sensors
+
+  # Register 0 – OnOff Remote On/Off Values:
+  # 0: Off
+  # 1: On
+  # 2: BDC Off
+  # 3: BDC On
+  # Writeable: Yes Type: Holding Register Unit: Integer (U_WORD)
+  # Consist of this Sensor, a Switch and a template switch
+  #Currently Only values 0 & 1 are handled in the switch part
+  - platform: modbus_controller
+    name: "Inverter Power Status"
+    id: status
+    skip_updates: ${skip_updates_1min}
+    address: 0
+    register_type: "read"
+    value_type: U_WORD
+    #internal: true
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    name: "Output Power"
+    address: 35
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:solar-power
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Energy Today"
+    skip_updates: ${skip_updates_1min}
+    address: 53
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:solar-power
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Energy Total"
+    skip_updates: ${skip_updates_10min}
+    address: 55
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:solar-power
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+    
+  - platform: modbus_controller
+    name: "Inverter Temperature"
+    address: 93
+    register_type: "read"
+    unit_of_measurement: °C
+    device_class: temperature
+    entity_category: diagnostic
+    icon: mdi:thermometer
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+    skip_updates: ${skip_updates_1min}
+
+  - platform: modbus_controller
+    name: "Inverter IPM Temperature"
+    skip_updates: ${skip_updates_1min}
+    address: 94
+    register_type: "read"
+    unit_of_measurement: °C
+    device_class: temperature
+    entity_category: diagnostic
+    icon: mdi:thermometer
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Inverter Boost Temperature"
+    skip_updates: ${skip_updates_1min}
+    address: 95
+    register_type: "read"
+    unit_of_measurement: °C
+    device_class: temperature
+    entity_category: diagnostic
+    icon: mdi:thermometer
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+## Solar Energy - BEGIN ##
+
+## Solar Energy - PV1 ##
+
+  - platform: modbus_controller
+    id: pv1_energy_today
+    name: "PV1 Energy Today"
+    address: 59
+    register_type: "read"
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    icon: mdi:solar-power-variant
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "PV1 Energy Total"
+    skip_updates: ${skip_updates_10min}
+    id: pv1_energy_total
+    address: 61
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:solar-power
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "PV1 Voltage"
+    address: 3
+    register_type: "read"
+    unit_of_measurement: V
+    device_class: voltage
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:flash-triangle-outline
+    value_type: U_WORD
+    accuracy_decimals: 2
+    filters:
+    - multiply: 0.1
+    
+  - platform: modbus_controller
+    name: "PV1 Current"
+    address: 4
+    register_type: "read"
+    unit_of_measurement: A
+    device_class: current
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:current-dc
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "PV1 Power"
+    id: pv1_power
+    address: 5
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:solar-power-variant
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+
+## Solar Energy - PV2 ##
+
+  - platform: modbus_controller
+    id: pv2_energy_today
+    name: "PV2 Energy Today"
+    address: 63
+    register_type: "read"
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    icon: mdi:solar-power-variant
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+  
+  - platform: modbus_controller
+    name: "PV2 Energy Total"
+    skip_updates: ${skip_updates_10min}
+    id: pv2_energy_total
+    address: 65
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:solar-power
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "PV2 Voltage"
+    address: 7
+    register_type: "read"
+    unit_of_measurement: V
+    device_class: voltage
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:flash-triangle-outline
+    value_type: U_WORD
+    accuracy_decimals: 2
+    filters:
+    - multiply: 0.1
+    
+  - platform: modbus_controller
+    name: "PV2 Current"
+    address: 8
+    register_type: "read"
+    unit_of_measurement: A
+    device_class: current
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:current-dc
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "PV2 Power"
+    id: pv2_power
+    address: 9
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    entity_category: diagnostic
+    state_class: measurement
+    icon: mdi:solar-power-variant
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+
+## Solar Energy - Totals ##
+
+  - platform: modbus_controller
+    name: "PV Energy Total"
+    skip_updates: ${skip_updates_10min}
+    id: pv_energy_total_inverter
+    address: 91
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:solar-power-variant
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: template
+    id: pv_energy_today
+    name: "PV Energy Today"
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    icon: mdi:solar-power-variant
+    accuracy_decimals: 1
+    lambda: |-
+      return float((id(pv1_energy_today).state + id(pv2_energy_today).state));
+    update_interval: ${update_slow}
+
+  - platform: template
+    id: pv_power
+    name: "PV Power"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    icon: mdi:solar-power-variant
+    accuracy_decimals: 1
+    lambda: |-
+      return float((id(pv1_power).state + id(pv2_power).state));
+    update_interval: ${update_fast}
+
+## Solar Energy - END ##
+
+
+## Grid Energy - BEGIN ##
+
+## Grid Energy - IMPORT ##
+  - platform: modbus_controller
+    name: "Energy to User Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1044
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-export
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+  
+  - platform: modbus_controller
+    name: "Energy to User Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1046
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-export
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Energy to User"
+    #id: PactouserTotal H#
+    address: 1021
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    icon: mdi:transmission-tower-export
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+
+## Grid Energy - EXPORT ##
+  - platform: modbus_controller
+    name: "Energy to Grid Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1048
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-import
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Energy to Grid Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1050
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-import
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Energy to Grid"
+    address: 1029
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    icon: mdi:transmission-tower-import
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+## Grid Energy - END ##
+
+
+## Battery - BEGIN ##
+  - platform: modbus_controller
+    name: "Battery Voltage"
+    address: 1013
+    register_type: "read"
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    entity_category: diagnostic
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 2
+    filters:
+    - multiply: 0.01
+
+  #battery related?#
+  - platform: modbus_controller
+    name: "SP Bus Volt"
+    address: 1042     
+    register_type: "read"
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    entity_category: diagnostic
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 2
+    filters:
+    - multiply: 0.01
+
+  - platform: modbus_controller
+    name: "Battery Temperature"
+    address: 1040
+    register_type: "read"
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement    
+    entity_category: diagnostic
+    icon: mdi:thermometer
+    skip_updates: ${skip_updates_1min}
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  # Register 1041 Battery State
+  # 0	Standby
+  # 1	Normal / Checking
+  # 3	Error / Fault
+  # 5	Normal, battery and solar online
+  # 6	Normal, only battery online (no PV input)
+  # Consists of a Sensor and a text sensor for translation
+  - platform: modbus_controller
+    name: "Battery State Value"
+    id: battery_state
+    address: 1041
+    register_type: "read"
+    icon: mdi:home-battery
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    name: "Battery SoC"
+    skip_updates: ${skip_updates_1min}
+    address: 1014
+    register_type: "read"
+    unit_of_measurement: "%"
+    icon: mdi:home-battery
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+
+## Battery - Discharging ##
+  - platform: modbus_controller
+    name: "Battery Discharging Power"
+    address: 1009
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:battery-arrow-down
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1       
+
+  - platform: modbus_controller
+    name: "Battery Discharge Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1052
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:battery-arrow-down
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Battery Discharge Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1054
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:battery-arrow-down
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+## Battery - Charging ##
+  #only show charge power from AC ? See register 1011 for a similar reading#
+  - platform: modbus_controller
+    name: "Battery AC Charging Power"
+    address: 1128
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:battery-arrow-up-outline
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1     
+
+  - platform: modbus_controller
+    name: "Battery AC Charge Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1124
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-export
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Battery AC Charge Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1126
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:transmission-tower-export
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  #The Below Battery Charge registers show combined pv/solar and ac charging)
+
+  #show current charging power to battery, no matter the source (ac or solar)#
+  - platform: modbus_controller
+    name: "Battery Charging Power"
+    address: 1011
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    icon: mdi:battery-arrow-up-outline
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    filters:
+    - multiply: 0.1     
+
+  - platform: modbus_controller
+    name: "Battery Charge Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1056
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:battery-arrow-up-outline
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "Battery Charge Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1058
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:battery-arrow-up-outline
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+## Battery - END ##
+
+  #need verification, is this the smartmeters reading of power draw?
+  #or the inverters power provided to cover local load?
+  - platform: modbus_controller
+    name: "INV Power to Local Load Total"
+    address: 1037
+    register_type: "read"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement    
+    icon: mdi:home-import-outline
+    value_type: U_DWORD
+    accuracy_decimals: 0
+    filters:
+    - multiply: 0.1
+
+  #need verification#
+  - platform: modbus_controller
+    name: "Local Load Today"
+    skip_updates: ${skip_updates_1min}
+    address: 1060
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:home-import-outline
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  #need verification#
+  - platform: modbus_controller
+    name: "Local Load Total"
+    skip_updates: ${skip_updates_10min}
+    address: 1062
+    register_type: "read"
+    unit_of_measurement: kWh
+    state_class: total_increasing
+    device_class: energy
+    icon: mdi:home-import-outline
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1   
+
+
+## AC General ###
+  - platform: modbus_controller
+    name: "AC Phase 1 Voltage"
+    address: 38
+    register_type: "read"
+    unit_of_measurement: V
+    state_class: measurement
+    device_class: voltage
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 1 Current"
+    address: 39
+    register_type: "read"
+    unit_of_measurement: A
+    state_class: measurement
+    device_class: current
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 1 Power"
+    address: 40
+    register_type: "read"
+    unit_of_measurement: W
+    state_class: measurement
+    device_class: power
+    icon: mdi:flash
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 2 Voltage"
+    address: 42
+    register_type: "read"
+    unit_of_measurement: V
+    state_class: measurement
+    device_class: voltage
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 2 Current"
+    address: 43
+    register_type: "read"
+    unit_of_measurement: A
+    state_class: measurement
+    device_class: current
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 2 Power"
+    address: 44
+    register_type: "read"
+    unit_of_measurement: W
+    state_class: measurement
+    device_class: power
+    icon: mdi:flash
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 3 Voltage"
+    address: 46
+    register_type: "read"
+    unit_of_measurement: V
+    state_class: measurement
+    device_class: voltage
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 3 Current"
+    address: 47
+    register_type: "read"
+    unit_of_measurement: A
+    state_class: measurement
+    device_class: current
+    icon: mdi:flash
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    name: "AC Phase 3 Power"
+    address: 48
+    register_type: "read"
+    unit_of_measurement: W
+    state_class: measurement
+    device_class: power
+    icon: mdi:flash
+    value_type: U_DWORD
+    accuracy_decimals: 1
+    filters:
+    - multiply: 0.1
+
+
+#Time Slots //Currently only Addded support for the Battery First 1 timeslot 
+  #Battery First - Start
+  - platform: modbus_controller
+    id: battery_first_start_raw
+    address: 1100
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            uint16_t raw = static_cast<uint16_t>(x);
+            uint8_t hour = (raw >> 8) & 0xFF;
+            uint8_t minute = raw & 0xFF;
+
+            // Only update template if different
+            if (id(battery_first_start).hour != hour || id(battery_first_start).minute != minute) {
+              auto call = id(battery_first_start).make_call();
+              call.set_time(hour, minute, 0);
+              call.perform();
+              ESP_LOGI("modbus", "Battery First Start updated to %02d:%02d", hour, minute);
+            }
+
+  #Battery First - End
+  - platform: modbus_controller
+    id: battery_first_end_raw
+    address: 1101
+    register_type: holding
+    value_type: U_WORD
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            uint16_t raw = static_cast<uint16_t>(x);
+            uint8_t hour = (raw >> 8) & 0xFF;
+            uint8_t minute = raw & 0xFF;
+
+            // Only update template if different
+            if (id(battery_first_end).hour != hour || id(battery_first_end).minute != minute) {
+              auto call = id(battery_first_end).make_call();
+              call.set_time(hour, minute, 0);
+              call.perform();
+              ESP_LOGI("modbus", "Battery First End updated to %02d:%02d", hour, minute);
+            }
+
+
+number:
+  - platform: modbus_controller
+    name: "Discharge SoC % (\"Grid First\")"
+    address: 1071
+    value_type: U_WORD
+    min_value: 10   #protection no values under 10 allowed
+    max_value: 100
+    step: 5
+
+  - platform: modbus_controller
+    name: "Discharge Power Rate (\"Grid First\")"
+    address: 1070
+    value_type: U_WORD
+    min_value: 10
+    max_value: 100
+    step: 1
+   
+  - platform: modbus_controller
+    name: "Charge Stop SoC % (\"Bat First\")"
+    address: 1091
+    value_type: U_WORD
+    min_value: 10
+    max_value: 100
+    step: 5
+
+  - platform: modbus_controller
+    name: "Charge Power Rate (\"Bat First\")"
+    address: 1090
+    value_type: U_WORD
+    min_value: 10
+    max_value: 100
+    step: 1   
+
+  ## NOTE Potentially not supported for US Models!!!! ####
+  ##Undocumented, tested via growatt server implementation, as the register holding the discharge stop soc (load) for EU Models. Note documentation for 608, OneKeySetBDCMode for US Models
+  - platform: modbus_controller
+    name: "Discharge Stop SoC % (\"Load First\")" 
+    address: 608
+    register_type: holding
+    value_type: U_WORD
+    min_value: 10   #protection no values under 10 allowed
+    max_value: 100
+    step: 5
+
+  #Uncertain, this value seems a bit strange as the doc describes is at -1000 to + 1000
+  #123 ExportLimitPowerRate ExportLimitPowerRate R/W -1000~+1000  0.1% ExportLimit PowerRate
+  - platform: modbus_controller
+    name: "Export Limit"
+    id: export_limit
+    register_type: holding
+    address: 123
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 1000 # for SPH 10000TL3 BH UP "1000" = "10.000 Watt"
+    step: 10
+
+#unverified function
+  - platform: modbus_controller
+    name: "Max Output Power"
+    id: growatt_max_power
+    register_type: holding
+    address: 3
+    value_type: U_WORD
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    device_class: power_factor
+    entity_category: config
+    mode: box
+    write_lambda: |-
+      return (uint16_t)x;
+
+
+select:
+  - platform: modbus_controller
+    name: "Battery First Timeslot 1"
+    id: battery_first_timeslot1_state
+    icon: mdi:battery-clock
+    address: 1102
+    value_type: U_WORD
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 1
+
+  #When enabled, then any enabled battery first timeslot will allow ac charging
+  - platform: modbus_controller
+    name: "AC Charging (\"Bat First\")"
+    icon: mdi:battery-charging-100
+    address: 1092
+    value_type: U_WORD
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 1
+
+  # Register 1044:
+  # Priority ForceChrEn/ForceDischrEn Access: Read/Write Values:
+  # 0: Load First
+  # 1: Battery First
+  # 2: Grid First
+  - platform: modbus_controller
+    name: "Inverter Priority"
+    icon: mdi:arrow-decision-outline
+    address: 1044
+    value_type: U_WORD
+    optionsmap:
+      "Load First": 0
+      "Battery First": 1
+      "Grid First": 2  
+    skip_updates: ${skip_updates_10min}
+
+  - platform: modbus_controller
+    name: "Export Control"
+    icon: mdi:home-import-outline
+    address: 122
+    value_type: U_WORD
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 1
+
+  - platform: modbus_controller
+    name: "EPS Mode"
+    id: eps_mode_select
+    address: 1060
+    icon: mdi:generator-mobile
+    optionsmap:
+      "Disabled": 0
+      "Enabled": 1
+    skip_updates: ${skip_updates_10min}
+
+switch:
+  - platform: modbus_controller
+    name: "Inverter Power Switch"
+    id: growatt_power_switch
+    address: 0
+    internal: true
+    register_type: holding
+    write_lambda: |-
+      if (x) {
+        ESP_LOGI("modbus", "Enabling Inverter");
+        return 1;  // ON
+      } else {
+        ESP_LOGI("modbus", "Disabling Inverter");
+        return 0;  // OFF
+      }
+    use_write_multiple: true
+
+  #See the Status State Template below 
+  - platform: template
+    name: "Inverter Power"
+    lambda: |-
+      return (id(status).state == 1 || id(status).state == 3 || id(status).state == 5 || id(status).state == 6);
+    turn_on_action:
+      - if:
+          condition:
+            - lambda: 'return id(boot_complete);'
+          then:
+            - switch.turn_on: growatt_power_switch
+    turn_off_action:
+      - if:
+          condition:
+            - lambda: 'return id(boot_complete);'
+          then:
+            - switch.turn_off: growatt_power_switch
+    icon: mdi:power
+
+text_sensor:
+  - platform: template
+    name: "Status state"
+    icon: mdi:eye
+    entity_category: diagnostic
+    lambda: |-
+      uint16_t value = static_cast<uint16_t>(id(status).state);
+      switch (value) {
+        case 0:  return std::string("Standby");
+        case 1:  return std::string("Normal");
+        case 2:  return std::string("Discharge");
+        case 3:  return std::string("Fault");
+        case 4:  return std::string("Flash");
+        case 5:  return std::string("PV Charging");
+        case 6:  return std::string("AC Charging");
+        case 7:  return std::string("Combined Charging");
+        case 8:  return std::string("Combined Charging & Bypass");
+        case 9:  return std::string("PV Charging & Bypass");
+        case 10: return std::string("AC Charging & Bypass");
+        case 11: return std::string("Bypass");
+        case 12: return std::string("PV Charge and Discharge");
+        default: 
+          ESP_LOGW("WARNING", "Unexpected Status state value: %u", value); // Log unexpected values
+          return std::string("Unknown");
+      }
+
+  - platform: modbus_controller
+    name: "Fault code"
+    skip_updates: ${skip_updates_10min}
+    address: 105
+    register_type: "read"
+    icon: mdi:eye
+    entity_category: diagnostic
+    raw_encode: HEXBYTES
+    lambda: |-
+      uint16_t value = modbus_controller::word_from_hex_str(x, 0);
+      switch (value) {
+        case 0:  return std::string("No error");
+        case 24: return std::string("Auto test failed");
+        case 25: return std::string("No AC connection");
+        case 26: return std::string("PV isolation low");
+        case 27: return std::string("Residual I high");
+        case 28: return std::string("Output high DCI");
+        case 29: return std::string("PV voltage high");
+        case 30: return std::string("AC voltage out of range");
+        case 31: return std::string("AC frequency out of range");
+        case 32: return std::string("Module too hot");
+        // case 1~23 " Error: 99+x
+        default: 
+          ESP_LOGW("WARNING", "Unexpected Fault code value: %u", value); // Log unexpected values
+          return std::string("Fault code: " + to_string(value));
+      }
+      return x;
+
+  - platform: template
+    name: "Battery State"
+    lambda: |-
+      uint16_t value = static_cast<uint16_t>(id(battery_state).state);
+      switch (value) {
+        case 0: return std::string("Standby");
+        case 1: return std::string("Normal / Checking");
+        case 3: return std::string("Error / Fault");
+        case 5: return std::string("Normal (Battery + Solar)");
+        case 6: return std::string("Normal (Battery Only)");
+        default:
+          ESP_LOGW("modbus", "Unknown Battery State: %u", value);
+          return std::string("Unknown");
+      }
+    update_interval: ${update_fast}
+    icon: mdi:home-battery
+
+button:
+  - platform: restart
+    name: "Restart Modbus Controller"
+
+  #These three buttons simply sets first timeslot 0-23:59, enabled for the desired mode, and sets a similar 0-23:59 timeslot disable for the unwanted modes. thus owerwriting any other timeslot logic.
+  #Considering removing these as there may better available methods (register 1044, and managing the individial timeslots for the individualt modes)    
+  - platform: template
+    name: "Battery First"
+    on_press:
+      then:
+          lambda: |-
+            esphome::modbus_controller::ModbusController *controller = id(controller1);
+            std::vector<uint16_t> on={0,23*256+59,1};
+            std::vector<uint16_t> off={0,23*256+59,0};
+            int size = on.size();
+
+            ESP_LOGI("ModbusLambda","Enqueue Writes");
+            //BF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,on));
+            //LF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,off));
+            //GF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,off));
+            ESP_LOGI("ModbusLambda","Writes");
+
+  - platform: template
+    name: "Load First"
+    on_press:
+      then:
+          lambda: |-
+            esphome::modbus_controller::ModbusController *controller = id(controller1);
+            std::vector<uint16_t> on={0,23*256+59,1};
+            std::vector<uint16_t> off={0,23*256+59,0};
+            int size = on.size();
+
+            ESP_LOGI("ModbusLambda","Enqueue Writes");
+            //BF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,off));
+            //LF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,on));
+            //GF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,off));
+            ESP_LOGI("ModbusLambda","Writes");
+
+  - platform: template
+    name: "Grid First"
+    on_press:
+      then:
+          lambda: |-
+            esphome::modbus_controller::ModbusController *controller = id(controller1);
+            std::vector<uint16_t> on={0,23*256+59,1};
+            std::vector<uint16_t> off={0,23*256+59,0};
+            int size = on.size();
+
+            ESP_LOGI("ModbusLambda","Enqueue Writes");
+            //BF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,off));
+            //LF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,off));
+            //GF1
+            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,on));
+            ESP_LOGI("ModbusLambda","Writes");
