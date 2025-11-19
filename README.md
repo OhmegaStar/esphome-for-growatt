@@ -15,7 +15,7 @@ forked from https://github.com/klatremis/esphome-for-growatt
 * (not confirmed)
 
 ### MOD inverters
-* (not confirmed)
+* MOD10000TL3-X (confirmed), use the growatt-mod-10k-tl3-x.yaml
 
 ### MID inverters
 * (not confirmed)
@@ -31,7 +31,7 @@ forked from https://github.com/klatremis/esphome-for-growatt
 1. Create your esp32 in esphome in home assistant
 2. Upload the your basis config via. usb from pc.
 3. Test wireless upload
-4. Copy all content (make sure you have your wifi ssid&password in the secrets)
+4. Copy all content (make sure you have your wifi ssid&password, esphome ota and api keys in the secrets)
 5. Edit the sensors in the config if you like
 6. Upload wireless
 
