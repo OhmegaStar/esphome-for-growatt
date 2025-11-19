@@ -1,14 +1,15 @@
-# ESPhome for Growatt by Klatremis (still under development)
+# ESPhome for Growatt by ohmegastar (still under development)
 ESPhome configuration for monitoring and control of Growatt inverters in Home Assistant.
-This include all addresses i could see relevant from the inverter.
+This include all addresses i could see relevant from the inverter, and then some.
 
-* For DIY generic esp32 hardware, use "esp32" and the wiring below
-* For KlatremisHW, use "klatremishw" code
+forked from https://github.com/klatremis/esphome-for-growatt
+
+* For DIY generic esp32 hardware, I use ESP32-S3-WROOM N16R8 Board with a TTL to RS485 Board with Auto Flow Control and the wiring below
 
 ## Supported devices
 ### SPH inverters
-* SPH3600 (confirmed)
-* SPH10000TL3 (not confirmed)
+* SPH10000TL3-BH-UP (confirmed), use the growatt-sph-10k-tl3-bh-up.yaml
+* SPH3600 (assumed) (was supported in the original klatremis code)
 
 ### MIC inverters
 * (not confirmed)
@@ -23,10 +24,8 @@ This include all addresses i could see relevant from the inverter.
 * (not confirmed)
 
 ## Requirements
-* ESP32
+* ESP32-S3-WROOM N16R8
 * TTL To RS485 Module with automatic flow control
-* or
-* KlatremisHW Basic/Lilygo t-can 485, *For now, only danish customers: https://badenergy.dk/product-category/inverter/inverter-styring/
 
 ## Installation
 1. Create your esp32 in esphome in home assistant
