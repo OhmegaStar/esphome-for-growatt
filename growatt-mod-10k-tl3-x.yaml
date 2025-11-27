@@ -119,14 +119,10 @@ modbus_controller:
 ######################################################################################################################
  
 sensor:
-
-
-    ##OK
   - platform: wifi_signal
     name: "Modbus WiFi Signal"
     update_interval: 60s
 
-    ##OK
   - platform: modbus_controller
     name: "status_code"
     id: status
@@ -136,7 +132,6 @@ sensor:
     internal: true
     accuracy_decimals: 0
 
-    ##OK
   - platform: modbus_controller
     name: "Energy Today"
     skip_updates: $skip_updates_slow
@@ -151,8 +146,6 @@ sensor:
     filters:
     - multiply: 0.1
 
-
-    ##OK
   - platform: modbus_controller
     name: "Energy Total"
     skip_updates: $skip_updates_slow
@@ -167,7 +160,7 @@ sensor:
     filters:
     - multiply: 0.1
     
- 
+  #need verification#
   - platform: modbus_controller
     name: "Inverter Temperature"
     address: 93
@@ -187,24 +180,10 @@ sensor:
 
 ## Solar Energy - BEGIN ##
 
- ## Ppv H Input power (high)
+ ##Input Power - Verify - what is this?#
   - platform: modbus_controller
-    name: "Input Power (Ppv H)"
+    name: "Input Power"
     address: 1
-    register_type: "read"
-    unit_of_measurement: W
-    device_class: power
-    entity_category: diagnostic
-    icon: mdi:solar-power
-    value_type: U_DWORD
-    accuracy_decimals: 0
-    filters:
-    - multiply: 0.1
-
- ## Ppv L Input power (low)
-  - platform: modbus_controller
-    name: "Input Power (Ppv L)"
-    address: 2
     register_type: "read"
     unit_of_measurement: W
     device_class: power
@@ -217,8 +196,6 @@ sensor:
 
 
 ## Solar Energy - PV1 ##
-
-  ##OK
   - platform: modbus_controller
     id: pv1_energy_today
     name: "PV1 Energy Today"
@@ -233,8 +210,6 @@ sensor:
     filters:
     - multiply: 0.1
 
-  
-  ##OK
   - platform: modbus_controller
     id: pv1_energy_total
     name: "PV1 Energy Total"
@@ -250,7 +225,6 @@ sensor:
     filters:
     - multiply: 0.1
 
-  ##OK
   - platform: modbus_controller
     name: "PV1 Voltage"
     address: 3
@@ -265,7 +239,6 @@ sensor:
     filters:
     - multiply: 0.1
     
-  ##OK
   - platform: modbus_controller
     name: "PV1 Current"
     address: 4
@@ -280,7 +253,6 @@ sensor:
     filters:
     - multiply: 0.1
 
-  ##OK
   - platform: modbus_controller
     name: "PV1 Power"
     id: pv1_power
@@ -298,9 +270,6 @@ sensor:
 
 
 ## Solar Energy - PV2 ##
-
-  
-  ##OK
   - platform: modbus_controller
     id: pv2_energy_today
     name: "PV2 Energy Today"
@@ -315,8 +284,6 @@ sensor:
     filters:
     - multiply: 0.1
   
-  
-  ##OK
   - platform: modbus_controller
     id: pv2_energy_total
     name: "PV2 Energy Total"
@@ -331,9 +298,7 @@ sensor:
     accuracy_decimals: 1
     filters:
     - multiply: 0.1
-
   
-  ##OK
   - platform: modbus_controller
     name: "PV2 Voltage"
     address: 7
@@ -347,9 +312,7 @@ sensor:
     accuracy_decimals: 2
     filters:
     - multiply: 0.1
-    
-  
-  ##OK
+ 
   - platform: modbus_controller
     name: "PV2 Current"
     address: 8
@@ -364,7 +327,6 @@ sensor:
     filters:
     - multiply: 0.1
 
-  ##OK
   - platform: modbus_controller
     id: pv2_power
     name: "PV2 Power"
@@ -383,7 +345,6 @@ sensor:
 
 ## Solar Energy - Totals ##
 
-  #Epv_total H
   - platform: modbus_controller
     id: pv_energy_total
     name: "${friendly_name} PV Energy Total"
@@ -432,28 +393,13 @@ sensor:
 ## ac output ##
 
 
-  ## Pac H Output power (high)
   - platform: modbus_controller
-    name: "Output Power (Pac H)"
+    name: "Output Power"
     address: 35
     register_type: "read"
     unit_of_measurement: W
     device_class: power
     entity_category: diagnostic
-    icon: mdi:solar-power
-    value_type: U_DWORD
-    accuracy_decimals: 0
-    filters:
-    - multiply: 0.1
-
-  ## Pac L Output power (Low)
-  - platform: modbus_controller
-    name: "Output Power (Pac L)"
-    address: 36
-    register_type: "read"
-    unit_of_measurement: W
-    entity_category: diagnostic
-    device_class: power
     icon: mdi:solar-power
     value_type: U_DWORD
     accuracy_decimals: 0
