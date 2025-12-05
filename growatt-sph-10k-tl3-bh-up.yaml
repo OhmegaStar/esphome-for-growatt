@@ -118,7 +118,7 @@ modbus_controller:
     #TODO: the command_throttle setting seem to cause queingn enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
     #longer term fix is looking a register groups ad poll frequency
     command_throttle: 1000ms # Growatt documentation recommends 1s 
-    allow_duplicate_commands: True
+#    allow_duplicate_commands: True
 
 ######################################################################################################################
 # Setup for Growatt SPH 10k-TL3 BH-UP
@@ -151,7 +151,7 @@ datetime:
                 uint16_t end_combined = (id(battery_first_end).hour << 8) | id(battery_first_end).minute;
 
                 // Read timeslot 1 enabled state flag
-                uint16_t enabled_flag =(id(battery_first_timeslot1_state).state == "Enabled") ? 1 : 0;
+                uint16_t enabled_flag =(id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
 
                 // Build payload: [start, end, enabled_flag]
                 std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
@@ -195,7 +195,7 @@ datetime:
                 uint16_t start_combined = (id(battery_first_start).hour << 8) | id(battery_first_start).minute;
 
                 // Read timeslot 1 enabled state flag
-                uint16_t enabled_flag =(id(battery_first_timeslot1_state).state == "Enabled") ? 1 : 0;
+                uint16_t enabled_flag =(id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
 
                 // Build payload: [start, end, enabled_flag]
                 std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
