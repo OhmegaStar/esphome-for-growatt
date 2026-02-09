@@ -22,6 +22,15 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  ##20260209 Fix Race Condition on writing the battery first timeslots. 
+  - id: battery_first_start_write_lock
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: battery_first_end_write_lock
+    type: bool
+    restore_value: no
+    initial_value: "false"
 
 esphome:
   name: '${device_name}'
@@ -56,6 +65,10 @@ api:
 ota:
   - platform: esphome
     password: !secret growatt-sph-10k-tl3-bh-up_ota-password
+
+# Enable IPv6
+network:
+    enable_ipv6: true
 
 wifi:
   ssid: !secret wifi_ssid
@@ -115,10 +128,10 @@ modbus_controller:
     modbus_id: modbus1
     setup_priority: -10
     update_interval: ${modbus_update_interval}
-    #TODO: the command_throttle setting seem to cause queingn enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
-    #longer term fix is looking a register groups ad poll frequency
+    #The command_throttle setting seem to cause queing enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
+    #longer term fix is looking a register groups and poll frequency
     command_throttle: 1000ms # Growatt documentation recommends 1s 
-#    allow_duplicate_commands: True
+    allow_duplicate_commands: True
 
 ######################################################################################################################
 # Setup for Growatt SPH 10k-TL3 BH-UP
@@ -133,44 +146,53 @@ datetime:
     id: battery_first_start
     name: "Battery First Start"
     type: time
-    optimistic: yes
+    optimistic: true
     restore_value: true
     on_value:
       then:
+        ##20260209 debounce delay, and block race condition from delays between write and inverter sensor read
+        - delay: 500ms   # adjust 200–500ms as needed
         - lambda: |-
             // Only write if raw sensor has a valid state
-            if (id(battery_first_start_raw).has_state() && id(battery_first_end_raw).has_state()) {
-              uint16_t start_combined = (x.hour << 8) | x.minute;
-              uint16_t current_raw = id(battery_first_start_raw).state;  // last raw register value
-
-              if (start_combined != current_raw) {
-                //Write Needed
-                esphome::modbus_controller::ModbusController *controller = id(controller1);
-
-                // Get current end time from template entity
-                uint16_t end_combined = (id(battery_first_end).hour << 8) | id(battery_first_end).minute;
-
-                // Read timeslot 1 enabled state flag
-                uint16_t enabled_flag =(id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
-
-                // Build payload: [start, end, enabled_flag]
-                std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
-
-                ESP_LOGI("modbus", "Battery First Timeslot 1 Write → Start %02d:%02d End %02d:%02d Enabled=%d",
-                        x.hour, x.minute,
-                        id(battery_first_end).hour, id(battery_first_end).minute,
-                        enabled_flag);
-
-                controller->queue_command(
-                  esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 1100, payload.size(), payload)
-                );
-
-                id(battery_first_start_raw).publish_state(start_combined);
-                ESP_LOGI("modbus", "Battery First Timeslot 1 Start Updated");
-              }
-            } else {
-              ESP_LOGI("modbus", "Skip write: raw sensors not yet initialized");
+            if (!id(battery_first_start_raw).has_state() ||
+                !id(battery_first_end_raw).has_state()) {
+              ESP_LOGI("modbus", "Skip write: Battery First Start - raw sensors not initialized");
+              return;
             }
+
+            uint16_t final_start = (id(battery_first_start).hour << 8) | id(battery_first_start).minute;
+            uint16_t current_start = id(battery_first_start_raw).state;
+
+            // Only write if changing
+            if (final_start == current_start) {
+              ESP_LOGI("modbus", "Skip write: Battery First Start - value unchanged");
+              return;
+            }
+            //20260209 fix for write atomic race condition that either reverts or partial reverts values written
+            //Set Lock to block Sensor reads
+            id(battery_first_start_write_lock) = true;
+
+            // Build payload
+            uint16_t new_end = (id(battery_first_end).hour << 8) | id(battery_first_end).minute;
+            uint16_t enabled_flag = (id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
+
+            std::vector<uint16_t> payload = {final_start, new_end, enabled_flag};
+
+            ESP_LOGI("modbus", "Writing Timeslot 1 → Start %02d:%02d",
+                    id(battery_first_start).hour,
+                    id(battery_first_start).minute);
+
+            esphome::modbus_controller::ModbusController *controller = id(controller1);
+
+            controller->queue_command(
+              esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
+                controller,
+                1100,
+                payload.size(),
+                payload
+              )
+            );
+            ESP_LOGI("modbus", "Battery First Start - Timeslot 1 Updated");
 
   #Battery First Timeslot 1 - End
   - platform: template
@@ -181,41 +203,49 @@ datetime:
     restore_value: true
     on_value:
       then:
+        ##20260209 debounce delay, and block race condition from delays between write and inverter sensor read
+        - delay: 500ms   # adjust 200–500ms as needed
         - lambda: |-
             // Only write if raw sensor has a valid state
-            if (id(battery_first_start_raw).has_state() && id(battery_first_end_raw).has_state()) {
-              uint16_t end_combined = (x.hour << 8) | x.minute;
-              uint16_t current_raw = id(battery_first_end_raw).state;  // last raw register value
-
-              if (end_combined != current_raw) {
-                //Write Needed
-                esphome::modbus_controller::ModbusController *controller = id(controller1);
-
-                // Get current start time from template entity
-                uint16_t start_combined = (id(battery_first_start).hour << 8) | id(battery_first_start).minute;
-
-                // Read timeslot 1 enabled state flag
-                uint16_t enabled_flag =(id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
-
-                // Build payload: [start, end, enabled_flag]
-                std::vector<uint16_t> payload = {start_combined, end_combined, enabled_flag};
-
-                ESP_LOGI("modbus", "Battery First Timeslot 1 Write → Start %02d:%02d End %02d:%02d Enabled=%d",
-                        id(battery_first_start).hour, id(battery_first_start).minute,
-                        x.hour, x.minute,
-                        enabled_flag);
-
-                controller->queue_command(
-                  esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller, 1100, payload.size(), payload)
-                );
-
-
-                id(battery_first_start_raw).publish_state(start_combined);
-                ESP_LOGI("modbus", "Battery First Timeslot 1 End Updated");
-              }
-            } else {
-              ESP_LOGI("modbus", "Skip write: raw sensors not yet initialized");
+            if (!id(battery_first_end_raw).has_state() ||
+                !id(battery_first_start_raw).has_state()) {
+              ESP_LOGI("modbus", "Skip write: Battery First End - raw sensors not initialized");
+              return;
             }
+
+            uint16_t final_end = (id(battery_first_end).hour << 8) | id(battery_first_end).minute;
+            uint16_t current_end = id(battery_first_end_raw).state;
+
+            // Only write if changing
+            if (final_end == current_end) {
+              ESP_LOGI("modbus", "Skip write: Battery First End - value unchanged");
+              return;
+            }
+            //20260209 fix for write atomic race condition that either reverts or partial reverts values written
+            //Set Lock to block Sensor reads
+            id(battery_first_end_write_lock) = true;
+
+            // Build payload
+            uint16_t new_start = (id(battery_first_start).hour << 8) | id(battery_first_start).minute;
+            uint16_t enabled_flag = (id(battery_first_timeslot1_state).current_option() == "Enabled") ? 1 : 0;
+
+            std::vector<uint16_t> payload = {new_start, final_end, enabled_flag};
+
+            ESP_LOGI("modbus", "Writing Timeslot 1 → End %02d:%02d",
+                    id(battery_first_end).hour,
+                    id(battery_first_end).minute);
+
+            esphome::modbus_controller::ModbusController *controller = id(controller1);
+
+            controller->queue_command(
+              esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
+                controller,
+                1100,
+                payload.size(),
+                payload
+              )
+            );
+            ESP_LOGI("modbus", "Battery First End - Timeslot 1 Updated");
             
 sensor:
   #Generic Sensors (not Growatt model specific)
@@ -998,13 +1028,27 @@ sensor:
             uint8_t hour = (raw >> 8) & 0xFF;
             uint8_t minute = raw & 0xFF;
 
-            // Only update template if different
+            //When lock for write in progress
+            if (id(battery_first_start_write_lock)) {
+              //if the values read raw match, clear the lock
+              if (id(battery_first_start).hour == hour &&
+                  id(battery_first_start).minute == minute) {
+                    id(battery_first_start_write_lock) = false;
+                    ESP_LOGI("modbus", "Battery First Start - Write lock released");
+                    return;
+                  }
+              ESP_LOGI("modbus", "Battery First Start - Raw update ignored (write in progress)");
+              return;
+            }
             if (id(battery_first_start).hour != hour || id(battery_first_start).minute != minute) {
               auto call = id(battery_first_start).make_call();
               call.set_time(hour, minute, 0);
               call.perform();
-              ESP_LOGI("modbus", "Battery First Start updated to %02d:%02d", hour, minute);
+
+              ESP_LOGI("modbus", "Battery First Start - updated from inverter → %02d:%02d",
+                        hour, minute);
             }
+
 
   #Battery First - End
   - platform: modbus_controller
@@ -1020,14 +1064,26 @@ sensor:
             uint8_t hour = (raw >> 8) & 0xFF;
             uint8_t minute = raw & 0xFF;
 
-            // Only update template if different
+            //When lock for write in progress
+            if (id(battery_first_end_write_lock)) {
+              //if the values read raw match, clear the lock
+              if (id(battery_first_end).hour == hour &&
+                  id(battery_first_end).minute == minute) {
+                    id(battery_first_end_write_lock) = false;
+                    ESP_LOGI("modbus", "Battery First End - Write lock released");
+                    return;
+                  }
+              ESP_LOGI("modbus", "Battery First End - Raw update ignored (write in progress)");
+              return;
+            }
             if (id(battery_first_end).hour != hour || id(battery_first_end).minute != minute) {
               auto call = id(battery_first_end).make_call();
               call.set_time(hour, minute, 0);
               call.perform();
-              ESP_LOGI("modbus", "Battery First End updated to %02d:%02d", hour, minute);
-            }
 
+              ESP_LOGI("modbus", "Battery First End - updated from inverter → %02d:%02d",
+                        hour, minute);
+            }
 
 number:
   - platform: modbus_controller
