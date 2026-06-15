@@ -714,9 +714,11 @@ sensor:
     skip_updates: ${skip_updates_1min}
     address: 1014
     register_type: "read"
-    unit_of_measurement: "%"
-    icon: mdi:home-battery
     value_type: U_WORD
+    unit_of_measurement: "%"
+#    icon: mdi:home-battery
+    device_class: battery
+    state_class: measurement
     accuracy_decimals: 0
 
 
