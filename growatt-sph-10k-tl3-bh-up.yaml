@@ -1183,22 +1183,6 @@ select:
       "Disabled": 0
       "Enabled": 1
 
-  # Register 1044:
-  # Priority ForceChrEn/ForceDischrEn Access: Read/Write Values:
-  # 0: Load First
-  # 1: Battery First
-  # 2: Grid First
-  - platform: modbus_controller
-    name: "Inverter Priority"
-    icon: mdi:arrow-decision-outline
-    address: 1044
-    value_type: U_WORD
-    optionsmap:
-      "Load First": 0
-      "Battery First": 1
-      "Grid First": 2  
-    skip_updates: ${skip_updates_10min}
-
   - platform: modbus_controller
     name: "Export Control"
     icon: mdi:home-import-outline
