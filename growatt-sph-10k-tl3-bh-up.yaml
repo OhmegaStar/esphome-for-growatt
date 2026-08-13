@@ -279,6 +279,16 @@ sensor:
     #internal: true
     accuracy_decimals: 0
 
+  ##Added Expose the Inverter Pririty Status
+  - platform: modbus_controller
+    name: "Inverter Priority Value"
+    id: priority_value
+    skip_updates: ${skip_updates_1min}
+    address: 118
+    register_type: "read"
+    value_type: U_WORD
+    accuracy_decimals: 0
+
   - platform: modbus_controller
     name: "Output Power"
     address: 35
@@ -1308,6 +1318,21 @@ text_sensor:
       }
     update_interval: ${update_fast}
     icon: mdi:home-battery
+
+  - platform: template
+    name: "Inverter Priority"
+    lambda: |-
+      uint16_t value = static_cast<uint16_t>(id(priority_value).state);
+      switch (value) {
+        case 0: return std::string("Load First");
+        case 1: return std::string("Battery First");
+        case 3: return std::string("Grid First");
+        default:
+          ESP_LOGW("modbus", "Unknown Priority Value: %u", value);
+          return std::string("Unknown");
+      }
+    update_interval: ${update_fast}
+    icon: mdi:arrow-decision-outline
 
 button:
   - platform: restart
