@@ -120,8 +120,11 @@ uart:
 
 modbus:
   id: modbus1
-# flow_control_pin: 4 #for use when you use a rs485 board without auto flow control. Like the rs485 max board.
- 
+  # flow_control_pin: 4 #for use when you use a rs485 board without auto flow control. Like the rs485 max board.
+  #change with esphome 2026.8 command_throttle inside the modbus_controller is deprecated
+  send_wait_time: 1000ms # Growatt documentation recommends 1s 
+  turnaround_time: 100ms    
+
 modbus_controller:
   - id: ${modbus_controller_id}
     address: 0x1
@@ -130,8 +133,8 @@ modbus_controller:
     update_interval: ${modbus_update_interval}
     #The command_throttle setting seem to cause queing enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
     #longer term fix is looking a register groups and poll frequency
-    command_throttle: 1000ms # Growatt documentation recommends 1s 
-    allow_duplicate_commands: True
+    #deprecated 2026.8 command_throttle: 1000ms # Growatt documentation recommends 1s 
+    #deprecated 2026.8 allow_duplicate_commands: True
 
 ######################################################################################################################
 # Setup for Growatt SPH 10k-TL3 BH-UP
