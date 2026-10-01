@@ -3,6 +3,10 @@
 Notable changes to the Growatt ESPHome configurations are recorded here.
 Versions follow Semantic Versioning.
 
+## [1.1.1] - 2026-10-01
+
+### Changed
+- added changelog, and updated release tooling accordingly (1d45754)
 ## [1.1.0] - 2026-10-01
 
 ### Changed
