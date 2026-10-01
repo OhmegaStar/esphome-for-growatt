@@ -3,9 +3,6 @@ substitutions:
   friendly_name: Growatt (Hybrid)
   device_description: Growatt SPH 10k TL3 BH-UP (Hybrid)
   modbus_controller_id: controller1
-  modbus_update_interval: 15s #normal update
-  skip_updates_1min: "4"  #how many times to skip normal update for slow updating sensors
-  skip_updates_10min: "20"  #how many times to skip normal update for slow updating sensors
   update_fast: "15s"
   update_normal: "60s"
   update_slow: "300s"
@@ -64,7 +61,8 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret growatt-sph-10k-tl3-bh-up_ota-password
+    encryption:
+      key: !secret growatt-sph-10k-tl3-bh-up_api-encryption-key
 
 # Enable IPv6
 network:
@@ -125,12 +123,17 @@ modbus:
   send_wait_time: 1000ms # Growatt documentation recommends 1s 
   turnaround_time: 100ms    
 
+modbus_client:
+  - id: growatt_modbus_client
+    modbus_id: modbus1
+    address: 0x01
+
 modbus_controller:
   - id: ${modbus_controller_id}
     address: 0x1
     modbus_id: modbus1
     setup_priority: -10
-    update_interval: ${modbus_update_interval}
+    update_interval: ${update_fast}
     #The command_throttle setting seem to cause queing enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
     #longer term fix is looking a register groups and poll frequency
     #deprecated 2026.8 command_throttle: 1000ms # Growatt documentation recommends 1s 
@@ -143,6 +146,18 @@ modbus_controller:
 # 04 register range：0~124,1000~1124，1125~1249 (The 04 registers are called "input" registes - read only)
 # Reference doc: growatt-inverter-modbus-rtu-protocol-ii-v1-24-english-new_compress.pdf
 ######################################################################################################################
+
+  - id: controller_normal
+    address: 0x1
+    modbus_id: modbus1
+    setup_priority: -10
+    update_interval: ${update_normal}
+  - id: controller_slow
+    address: 0x1
+    modbus_id: modbus1
+    setup_priority: -10
+    update_interval: ${update_slow}
+
 datetime:
   #Battery First Timeslot 1 - Start
   - platform: template
@@ -185,16 +200,7 @@ datetime:
                     id(battery_first_start).hour,
                     id(battery_first_start).minute);
 
-            esphome::modbus_controller::ModbusController *controller = id(controller1);
-
-            controller->queue_command(
-              esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
-                controller,
-                1100,
-                payload.size(),
-                payload
-              )
-            );
+            id(growatt_modbus_client).write_multiple_registers(1100, payload);
             ESP_LOGI("modbus", "Battery First Start - Timeslot 1 Updated");
 
   #Battery First Timeslot 1 - End
@@ -238,16 +244,7 @@ datetime:
                     id(battery_first_end).hour,
                     id(battery_first_end).minute);
 
-            esphome::modbus_controller::ModbusController *controller = id(controller1);
-
-            controller->queue_command(
-              esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(
-                controller,
-                1100,
-                payload.size(),
-                payload
-              )
-            );
+            id(growatt_modbus_client).write_multiple_registers(1100, payload);
             ESP_LOGI("modbus", "Battery First End - Timeslot 1 Updated");
             
 sensor:
@@ -273,9 +270,9 @@ sensor:
   # Consist of this Sensor, a Switch and a template switch
   #Currently Only values 0 & 1 are handled in the switch part
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter Power Status"
     id: status
-    skip_updates: ${skip_updates_1min}
     address: 0
     register_type: "read"
     value_type: U_WORD
@@ -284,15 +281,16 @@ sensor:
 
   ##Added Expose the Inverter Pririty Status
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter Priority Value"
     id: priority_value
-    skip_updates: ${skip_updates_1min}
     address: 118
     register_type: "read"
     value_type: U_WORD
     accuracy_decimals: 0
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Output Power"
     address: 35
     register_type: "read"
@@ -305,8 +303,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Energy Today"
-    skip_updates: ${skip_updates_1min}
     address: 53
     register_type: "read"
     unit_of_measurement: kWh
@@ -319,8 +317,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Energy Total"
-    skip_updates: ${skip_updates_10min}
     address: 55
     register_type: "read"
     unit_of_measurement: kWh
@@ -333,6 +331,7 @@ sensor:
     - multiply: 0.1
     
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter Temperature"
     address: 93
     register_type: "read"
@@ -344,11 +343,10 @@ sensor:
     accuracy_decimals: 1
     filters:
     - multiply: 0.1
-    skip_updates: ${skip_updates_1min}
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter IPM Temperature"
-    skip_updates: ${skip_updates_1min}
     address: 94
     register_type: "read"
     unit_of_measurement: °C
@@ -361,8 +359,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter Boost Temperature"
-    skip_updates: ${skip_updates_1min}
     address: 95
     register_type: "read"
     unit_of_measurement: °C
@@ -379,6 +377,7 @@ sensor:
 ## Solar Energy - PV1 ##
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: pv1_energy_today
     name: "PV1 Energy Today"
     address: 59
@@ -393,8 +392,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "PV1 Energy Total"
-    skip_updates: ${skip_updates_10min}
     id: pv1_energy_total
     address: 61
     register_type: "read"
@@ -408,6 +407,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Voltage"
     address: 3
     register_type: "read"
@@ -422,6 +422,7 @@ sensor:
     - multiply: 0.1
     
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Current"
     address: 4
     register_type: "read"
@@ -436,6 +437,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Power"
     id: pv1_power
     address: 5
@@ -454,6 +456,7 @@ sensor:
 ## Solar Energy - PV2 ##
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: pv2_energy_today
     name: "PV2 Energy Today"
     address: 63
@@ -468,8 +471,8 @@ sensor:
     - multiply: 0.1
   
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "PV2 Energy Total"
-    skip_updates: ${skip_updates_10min}
     id: pv2_energy_total
     address: 65
     register_type: "read"
@@ -483,6 +486,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV2 Voltage"
     address: 7
     register_type: "read"
@@ -497,6 +501,7 @@ sensor:
     - multiply: 0.1
     
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV2 Current"
     address: 8
     register_type: "read"
@@ -511,6 +516,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV2 Power"
     id: pv2_power
     address: 9
@@ -529,8 +535,8 @@ sensor:
 ## Solar Energy - Totals ##
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "PV Energy Total"
-    skip_updates: ${skip_updates_10min}
     id: pv_energy_total_inverter
     address: 91
     register_type: "read"
@@ -574,8 +580,8 @@ sensor:
 
 ## Grid Energy - IMPORT ##
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Energy to User Today"
-    skip_updates: ${skip_updates_1min}
     address: 1044
     register_type: "read"
     unit_of_measurement: kWh
@@ -588,8 +594,8 @@ sensor:
     - multiply: 0.1
   
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Energy to User Total"
-    skip_updates: ${skip_updates_10min}
     address: 1046
     register_type: "read"
     unit_of_measurement: kWh
@@ -602,6 +608,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Energy to User"
     #id: PactouserTotal H#
     address: 1021
@@ -618,8 +625,8 @@ sensor:
 
 ## Grid Energy - EXPORT ##
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Energy to Grid Today"
-    skip_updates: ${skip_updates_1min}
     address: 1048
     register_type: "read"
     unit_of_measurement: kWh
@@ -632,8 +639,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Energy to Grid Total"
-    skip_updates: ${skip_updates_10min}
     address: 1050
     register_type: "read"
     unit_of_measurement: kWh
@@ -646,6 +653,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Energy to Grid"
     address: 1029
     register_type: "read"
@@ -663,6 +671,7 @@ sensor:
 
 ## Battery - BEGIN ##
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery Voltage"
     address: 1013
     register_type: "read"
@@ -678,6 +687,7 @@ sensor:
 
   #battery related?#
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "SP Bus Volt"
     address: 1042     
     register_type: "read"
@@ -692,6 +702,7 @@ sensor:
     - multiply: 0.01
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Battery Temperature"
     address: 1040
     register_type: "read"
@@ -700,7 +711,6 @@ sensor:
     state_class: measurement    
     entity_category: diagnostic
     icon: mdi:thermometer
-    skip_updates: ${skip_updates_1min}
     value_type: U_WORD
     accuracy_decimals: 1
     filters:
@@ -714,6 +724,7 @@ sensor:
   # 6	Normal, only battery online (no PV input)
   # Consists of a Sensor and a text sensor for translation
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery State Value"
     id: battery_state
     address: 1041
@@ -723,8 +734,8 @@ sensor:
     accuracy_decimals: 0
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Battery SoC"
-    skip_updates: ${skip_updates_1min}
     address: 1014
     register_type: "read"
     value_type: U_WORD
@@ -737,6 +748,7 @@ sensor:
 
 ## Battery - Discharging ##
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery Discharging Power"
     address: 1009
     register_type: "read"
@@ -749,8 +761,8 @@ sensor:
     - multiply: 0.1       
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Battery Discharge Today"
-    skip_updates: ${skip_updates_1min}
     address: 1052
     register_type: "read"
     unit_of_measurement: kWh
@@ -763,8 +775,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Battery Discharge Total"
-    skip_updates: ${skip_updates_10min}
     address: 1054
     register_type: "read"
     unit_of_measurement: kWh
@@ -779,6 +791,7 @@ sensor:
 ## Battery - Charging ##
   #only show charge power from AC ? See register 1011 for a similar reading#
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery AC Charging Power"
     address: 1128
     register_type: "read"
@@ -791,8 +804,8 @@ sensor:
     - multiply: 0.1     
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Battery AC Charge Today"
-    skip_updates: ${skip_updates_1min}
     address: 1124
     register_type: "read"
     unit_of_measurement: kWh
@@ -805,8 +818,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Battery AC Charge Total"
-    skip_updates: ${skip_updates_10min}
     address: 1126
     register_type: "read"
     unit_of_measurement: kWh
@@ -822,6 +835,7 @@ sensor:
 
   #show current charging power to battery, no matter the source (ac or solar)#
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery Charging Power"
     address: 1011
     register_type: "read"
@@ -834,8 +848,8 @@ sensor:
     - multiply: 0.1     
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Battery Charge Today"
-    skip_updates: ${skip_updates_1min}
     address: 1056
     register_type: "read"
     unit_of_measurement: kWh
@@ -848,8 +862,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Battery Charge Total"
-    skip_updates: ${skip_updates_10min}
     address: 1058
     register_type: "read"
     unit_of_measurement: kWh
@@ -866,6 +880,7 @@ sensor:
   #need verification, is this the smartmeters reading of power draw?
   #or the inverters power provided to cover local load?
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "INV Power to Local Load Total"
     address: 1037
     register_type: "read"
@@ -880,8 +895,8 @@ sensor:
 
   #need verification#
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Local Load Today"
-    skip_updates: ${skip_updates_1min}
     address: 1060
     register_type: "read"
     unit_of_measurement: kWh
@@ -895,8 +910,8 @@ sensor:
 
   #need verification#
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Local Load Total"
-    skip_updates: ${skip_updates_10min}
     address: 1062
     register_type: "read"
     unit_of_measurement: kWh
@@ -911,6 +926,7 @@ sensor:
 
 ## AC General ###
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 1 Voltage"
     address: 38
     register_type: "read"
@@ -924,6 +940,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 1 Current"
     address: 39
     register_type: "read"
@@ -937,6 +954,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 1 Power"
     address: 40
     register_type: "read"
@@ -950,6 +968,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 2 Voltage"
     address: 42
     register_type: "read"
@@ -963,6 +982,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 2 Current"
     address: 43
     register_type: "read"
@@ -976,6 +996,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 2 Power"
     address: 44
     register_type: "read"
@@ -989,6 +1010,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 3 Voltage"
     address: 46
     register_type: "read"
@@ -1002,6 +1024,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 3 Current"
     address: 47
     register_type: "read"
@@ -1015,6 +1038,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Phase 3 Power"
     address: 48
     register_type: "read"
@@ -1031,6 +1055,7 @@ sensor:
 #Time Slots //Currently only Addded support for the Battery First 1 timeslot 
   #Battery First - Start
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: battery_first_start_raw
     address: 1100
     register_type: holding
@@ -1067,6 +1092,7 @@ sensor:
 
   #Battery First - End
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: battery_first_end_raw
     address: 1101
     register_type: holding
@@ -1102,6 +1128,7 @@ sensor:
 
 number:
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Discharge SoC % (\"Grid First\")"
     address: 1071
     value_type: U_WORD
@@ -1110,6 +1137,7 @@ number:
     step: 5
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Discharge Power Rate (\"Grid First\")"
     address: 1070
     value_type: U_WORD
@@ -1118,6 +1146,7 @@ number:
     step: 1
    
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Charge Stop SoC % (\"Bat First\")"
     address: 1091
     value_type: U_WORD
@@ -1126,6 +1155,7 @@ number:
     step: 5
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Charge Power Rate (\"Bat First\")"
     address: 1090
     value_type: U_WORD
@@ -1136,6 +1166,7 @@ number:
   ## NOTE Potentially not supported for US Models!!!! ####
   ##Undocumented, tested via growatt server implementation, as the register holding the discharge stop soc (load) for EU Models. Note documentation for 608, OneKeySetBDCMode for US Models
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Discharge Stop SoC % (\"Load First\")" 
     address: 608
     register_type: holding
@@ -1147,6 +1178,7 @@ number:
   #Uncertain, this value seems a bit strange as the doc describes is at -1000 to + 1000
   #123 ExportLimitPowerRate ExportLimitPowerRate R/W -1000~+1000  0.1% ExportLimit PowerRate
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Export Limit"
     id: export_limit
     register_type: holding
@@ -1159,6 +1191,7 @@ number:
 
 #unverified function
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Max Output Power"
     id: growatt_max_power
     register_type: holding
@@ -1177,6 +1210,7 @@ number:
 
 select:
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Battery First Timeslot 1"
     id: battery_first_timeslot1_state
     icon: mdi:battery-clock
@@ -1188,6 +1222,7 @@ select:
 
   #When enabled, then any enabled battery first timeslot will allow ac charging
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "AC Charging (\"Bat First\")"
     icon: mdi:battery-charging-100
     address: 1092
@@ -1197,6 +1232,7 @@ select:
       "Enabled": 1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Export Control"
     icon: mdi:home-import-outline
     address: 122
@@ -1206,6 +1242,7 @@ select:
       "Enabled": 1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "EPS Mode"
     id: eps_mode_select
     address: 1060
@@ -1213,10 +1250,10 @@ select:
     optionsmap:
       "Disabled": 0
       "Enabled": 1
-    skip_updates: ${skip_updates_10min}
 
 switch:
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Inverter Power Switch"
     id: growatt_power_switch
     address: 0
@@ -1278,15 +1315,15 @@ text_sensor:
       }
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Fault code"
-    skip_updates: ${skip_updates_10min}
     address: 105
     register_type: "read"
     icon: mdi:eye
     entity_category: diagnostic
     raw_encode: HEXBYTES
     lambda: |-
-      uint16_t value = modbus_controller::word_from_hex_str(x, 0);
+      uint16_t value = modbus::helpers::word_from_hex_str(x, 0);
       switch (value) {
         case 0:  return std::string("No error");
         case 24: return std::string("Auto test failed");
@@ -1348,18 +1385,16 @@ button:
     on_press:
       then:
           lambda: |-
-            esphome::modbus_controller::ModbusController *controller = id(controller1);
             std::vector<uint16_t> on={0,23*256+59,1};
             std::vector<uint16_t> off={0,23*256+59,0};
-            int size = on.size();
 
             ESP_LOGI("ModbusLambda","Enqueue Writes");
             //BF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,on));
+            id(growatt_modbus_client).write_multiple_registers(1100,on);
             //LF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1110,off);
             //GF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1080,off);
             ESP_LOGI("ModbusLambda","Writes");
 
   - platform: template
@@ -1367,18 +1402,16 @@ button:
     on_press:
       then:
           lambda: |-
-            esphome::modbus_controller::ModbusController *controller = id(controller1);
             std::vector<uint16_t> on={0,23*256+59,1};
             std::vector<uint16_t> off={0,23*256+59,0};
-            int size = on.size();
 
             ESP_LOGI("ModbusLambda","Enqueue Writes");
             //BF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1100,off);
             //LF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,on));
+            id(growatt_modbus_client).write_multiple_registers(1110,on);
             //GF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1080,off);
             ESP_LOGI("ModbusLambda","Writes");
 
   - platform: template
@@ -1386,16 +1419,14 @@ button:
     on_press:
       then:
           lambda: |-
-            esphome::modbus_controller::ModbusController *controller = id(controller1);
             std::vector<uint16_t> on={0,23*256+59,1};
             std::vector<uint16_t> off={0,23*256+59,0};
-            int size = on.size();
 
             ESP_LOGI("ModbusLambda","Enqueue Writes");
             //BF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1100,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1100,off);
             //LF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1110,size,off));
+            id(growatt_modbus_client).write_multiple_registers(1110,off);
             //GF1
-            controller->queue_command(esphome::modbus_controller::ModbusCommandItem::create_write_multiple_command(controller,1080,size,on));
+            id(growatt_modbus_client).write_multiple_registers(1080,on);
             ESP_LOGI("ModbusLambda","Writes");
