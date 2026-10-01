@@ -39,6 +39,17 @@ https://github.com/OhmegaStar/ad-growatt
 5. Edit the sensors in the config if you like
 6. Upload wireless
 
+## Releases
+Latest release: **Not published yet**
+
+To publish a release, commit all intended changes and run:
+
+```powershell
+.\tools\release.ps1 -Version 1.0.0 -Push
+```
+
+The script updates this README, creates a `v1.0.0` release commit and tag, then pushes both. GitHub Actions publishes a GitHub Release with generated release notes when the tag is pushed. Omit `-Push` to review the commit and tag before pushing them manually.
+
 ## Wiring of generic esp32 & TTL module
 RX / TX between esp and ttl converter may have to be swapped. This seems to be a little different from espboard to espboard.
 If it dosent communicate(RX/TX led both blinking) Try swap rx/tx on the esp.
