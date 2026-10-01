@@ -30,8 +30,27 @@ jobs:
             throw "README.md latest release does not match tag $tag"
           }
 
+      - name: Extract version changelog section
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $escapedVersion = [regex]::Escape($version)
+          $pattern = "(?ms)^## \[$escapedVersion\] - [^\r\n]*\r?\n(.*?)(?=^## \[\d+\.\d+\.\d+\] - |\z)"
+          $changelog = [System.IO.File]::ReadAllText('CHANGELOG.md')
+          $match = [regex]::Match($changelog, $pattern)
+          if (-not $match.Success) {
+            throw "CHANGELOG.md has no section for version $version"
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          if (-not $notes) {
+            throw "CHANGELOG.md section for version $version is empty"
+          }
+          [System.IO.File]::WriteAllText('release-notes.md', $notes + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "${RELEASE_TAG}" --title "${RELEASE_TAG}" --generate-notes
+        run: gh release create "${RELEASE_TAG}" --title "${RELEASE_TAG}" --notes-file release-notes.md

@@ -38,19 +38,26 @@ try {
     $releaseTags = @(Invoke-Git -Arguments @('tag', '--list', 'v*', '--sort=-version:refname') |
         Where-Object { $_ -match '^v[0-9]+\.[0-9]+\.[0-9]+$' })
     if ($releaseTags.Count -gt 0) {
-        $commits = @(Invoke-Git -Arguments @('log', "$($releaseTags[0])..HEAD", '--oneline'))
+        $commitRange = "$($releaseTags[0])..HEAD"
     } else {
-        $commits = @(Invoke-Git -Arguments @('log', '--oneline'))
+        $commitRange = 'HEAD'
     }
-    if ($commits.Count -eq 0) {
+    $commitMessages = @(Invoke-Git -Arguments @('log', $commitRange, '--format=- %s (%h)'))
+    if ($commitMessages.Count -eq 0) {
         throw 'No commits found since the previous release.'
     }
 
     $readmePath = Join-Path (Get-Location) 'README.md'
+    $changelogPath = Join-Path (Get-Location) 'CHANGELOG.md'
     $readme = [System.IO.File]::ReadAllText($readmePath)
+    $changelog = [System.IO.File]::ReadAllText($changelogPath)
     $marker = '(?m)^Latest release:.*$'
     if ([regex]::Matches($readme, $marker).Count -ne 1) {
         throw 'README.md must contain exactly one "Latest release:" line.'
+    }
+    $versionHeading = [regex]::Match($changelog, '(?m)^## \[[0-9]+\.[0-9]+\.[0-9]+\] - ')
+    if (-not $versionHeading.Success) {
+        throw 'CHANGELOG.md must contain at least one dated version section.'
     }
 
     $date = Get-Date -Format 'yyyy-MM-dd'
@@ -59,14 +66,28 @@ try {
         "Latest release: **$tag** (released $date)",
         1
     )
+    $newline = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $entryLines = @(
+        "## [$Version] - $date"
+        ''
+        '### Changed'
+    ) + $commitMessages + @('')
+    $changelogEntry = [string]::Join($newline, [string[]]$entryLines)
+    $updatedChangelog = $changelog.Insert($versionHeading.Index, $changelogEntry)
+
     [System.IO.File]::WriteAllText(
         $readmePath,
         $updatedReadme,
         [System.Text.UTF8Encoding]::new($false)
     )
+    [System.IO.File]::WriteAllText(
+        $changelogPath,
+        $updatedChangelog,
+        [System.Text.UTF8Encoding]::new($false)
+    )
 
     Invoke-Git -Arguments @('diff', '--check') | Out-Null
-    Invoke-Git -Arguments @('add', '--', 'README.md') | Out-Null
+    Invoke-Git -Arguments @('add', '--', 'README.md', 'CHANGELOG.md') | Out-Null
     Invoke-Git -Arguments @('commit', '-m', "Release $tag") | Out-Null
     Invoke-Git -Arguments @('tag', $tag) | Out-Null
 

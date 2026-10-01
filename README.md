@@ -42,13 +42,13 @@ https://github.com/OhmegaStar/ad-growatt
 ## Releases
 Latest release: **v1.1.0** (released 2026-10-01)
 
-To publish a release, commit all intended changes and run:
+See [CHANGELOG.md](CHANGELOG.md) for release history. To publish a release, commit all intended changes and run with the next version number, for example:
 
 ```powershell
-.\tools\release.ps1 -Version 1.0.0 -Push
+\.\tools\release.ps1 -Version 1.2.0 -Push
 ```
 
-The script updates this README, creates a `v1.0.0` release commit and tag, then pushes both. GitHub Actions publishes a GitHub Release with generated release notes when the tag is pushed. Omit `-Push` to review the commit and tag before pushing them manually.
+The script updates this README and CHANGELOG.md from commits since the previous release, creates a matching release commit and tag, then pushes both. GitHub Actions publishes a GitHub Release with generated release notes when the tag is pushed. Omit `-Push` to review the commit and tag before pushing them manually.
 
 ## Wiring of generic esp32 & TTL module
 RX / TX between esp and ttl converter may have to be swapped. This seems to be a little different from espboard to espboard.
