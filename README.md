@@ -40,7 +40,7 @@ https://github.com/OhmegaStar/ad-growatt
 6. Upload wireless
 
 ## Releases
-Latest release: **v1.0.0** (released 2026-10-01)
+Latest release: **v1.1.0** (released 2026-10-01)
 
 To publish a release, commit all intended changes and run:
 
