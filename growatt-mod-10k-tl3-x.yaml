@@ -3,10 +3,6 @@ substitutions:
   friendly_name: Growatt (Standart)
   device_description: Growatt MOD 10k TL3-X (Standart)
   modbus_controller_id: controller1
-  modbus_update_interval: 15s #normal update
-  skip_updates_slow: "6"  #how many times to skip normal update for slow updating sensors
-  skip_updates_1min: "4"  #how many times to skip normal update for slow updating sensors
-  skip_updates_10min: "20"  #how many times to skip normal update for slow updating sensors
   update_fast: "15s"
   update_normal: "60s"
   update_slow: "300s"
@@ -46,7 +42,8 @@ api:
     
 ota:
   - platform: esphome
-    password: !secret growatt-mod-10k-tl3-x_ota-password
+    encryption:
+      key: !secret growatt-mod-10k-tl3-x_api-encryption-key
     
 wifi:
   ssid: !secret wifi_ssid
@@ -108,7 +105,7 @@ modbus_controller:
     address: 0x1
     modbus_id: modbus1
     setup_priority: -10  
-    update_interval: ${modbus_update_interval}
+    update_interval: ${update_fast}
     #The command_throttle setting seem to cause queing enhough that some "Duplicate modbus command found" messages appear. fixed by allowing the duplicates in the queue.
     #longer term fix is looking a register groups and poll frequency
     #deprecated 2026.8 command_throttle: 1000ms # Growatt documentation recommends 1s 
@@ -122,6 +119,18 @@ modbus_controller:
 # 04 register range：0~124,125~249 (The 04 registers are called "input" registes - read only)
 # Reference doc: growatt-inverter-modbus-rtu-protocol-ii-v1-24-english-new_compress.pdf
 ######################################################################################################################
+
+  - id: controller_normal
+    address: 0x1
+    modbus_id: modbus1
+    setup_priority: -10
+    update_interval: ${update_normal}
+  - id: controller_slow
+    address: 0x1
+    modbus_id: modbus1
+    setup_priority: -10
+    update_interval: ${update_slow}
+
  
 sensor:
   - platform: wifi_signal
@@ -129,17 +138,17 @@ sensor:
     update_interval: 60s
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "status_code"
     id: status
-    skip_updates: $skip_updates_slow
     address: 0
     register_type: "read"
     internal: true
     accuracy_decimals: 0
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Energy Today"
-    skip_updates: $skip_updates_slow
     address: 53
     register_type: "read"
     unit_of_measurement: kWh
@@ -152,8 +161,8 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Energy Total"
-    skip_updates: $skip_updates_slow
     address: 55
     register_type: "read"
     unit_of_measurement: kWh
@@ -167,6 +176,7 @@ sensor:
     
   #need verification#
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     name: "Inverter Temperature"
     address: 93
     register_type: "read"
@@ -178,7 +188,6 @@ sensor:
     accuracy_decimals: 1
     filters:
     - multiply: 0.1
-    skip_updates: $skip_updates_slow
 
 
 
@@ -187,6 +196,7 @@ sensor:
 
  ##Input Power - Verify - what is this?#
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Input Power"
     address: 1
     register_type: "read"
@@ -202,6 +212,7 @@ sensor:
 
 ## Solar Energy - PV1 ##
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: pv1_energy_today
     name: "PV1 Energy Today"
     address: 59
@@ -216,9 +227,9 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     id: pv1_energy_total
     name: "PV1 Energy Total"
-    skip_updates: $skip_updates_slow
     address: 61
     register_type: "read"
     unit_of_measurement: kWh
@@ -231,6 +242,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Voltage"
     address: 3
     register_type: "read"
@@ -245,6 +257,7 @@ sensor:
     - multiply: 0.1
     
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Current"
     address: 4
     register_type: "read"
@@ -259,6 +272,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV1 Power"
     id: pv1_power
     address: 5
@@ -276,6 +290,7 @@ sensor:
 
 ## Solar Energy - PV2 ##
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: pv2_energy_today
     name: "PV2 Energy Today"
     address: 63
@@ -290,9 +305,9 @@ sensor:
     - multiply: 0.1
   
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     id: pv2_energy_total
     name: "PV2 Energy Total"
-    skip_updates: $skip_updates_slow
     address: 65
     register_type: "read"
     unit_of_measurement: kWh
@@ -305,6 +320,7 @@ sensor:
     - multiply: 0.1
   
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV2 Voltage"
     address: 7
     register_type: "read"
@@ -319,6 +335,7 @@ sensor:
     - multiply: 0.1
  
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "PV2 Current"
     address: 8
     register_type: "read"
@@ -333,6 +350,7 @@ sensor:
     - multiply: 0.1
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     id: pv2_power
     name: "PV2 Power"
     address: 9
@@ -351,9 +369,9 @@ sensor:
 ## Solar Energy - Totals ##
 
   - platform: modbus_controller
+    modbus_controller_id: controller_normal
     id: pv_energy_total
     name: "${friendly_name} PV Energy Total"
-    skip_updates: $skip_updates_slow
     address: 91
     register_type: "read"
     unit_of_measurement: kWh
@@ -399,6 +417,7 @@ sensor:
 
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Output Power"
     address: 35
     register_type: "read"
@@ -424,6 +443,7 @@ select:
     ### The inverter can be switched on and off, and the BDC can be switched on and off for the batt ready function. ### 
     ### Writable ###
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "${device_name} Inverter Operation Mode"
     icon: mdi:power
     ##id OnOff
@@ -437,6 +457,7 @@ select:
 
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Maximum Active Power Output %"
     address: 03
     value_type: U_WORD
@@ -455,6 +476,7 @@ select:
       "Unlimited (Default)": 255
 
   - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller_id}
     name: "Maximum Reactive Power Output %"
     address: 04
     value_type: U_WORD
@@ -500,15 +522,15 @@ text_sensor:
       }
 
   - platform: modbus_controller
+    modbus_controller_id: controller_slow
     name: "Fault code"
-    skip_updates: ${skip_updates_10min}
     address: 105
     register_type: "read"
     icon: mdi:eye
     entity_category: diagnostic
     raw_encode: HEXBYTES
     lambda: |-
-      uint16_t value = modbus_controller::word_from_hex_str(x, 0);
+      uint16_t value = modbus::helpers::word_from_hex_str(x, 0);
       switch (value) {
         case 0:  return std::string("No error");
         case 24: return std::string("Auto test failed");
@@ -528,7 +550,3 @@ text_sensor:
       return x;
  
 ################################################################################################################################## 
- 
- 
-
-
